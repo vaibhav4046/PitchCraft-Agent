@@ -129,6 +129,84 @@ def _ensure_keys(obj: dict) -> dict:
     return out
 
 
+def _regex_extract(text: str) -> dict:
+    """Deterministic, NO-LLM signal extraction. Fallback used when Gemini is
+    unavailable (429/quota/timeout) so the pipeline still reaches a verdict from
+    obvious scam signals instead of dying at step 1. Covers the dominant fraud
+    tells: irreversible payment, off-app transfer, below-face price, urgency."""
+    t = " " + (text or "").lower() + " "
+    out: dict[str, Any] = {}
+    for name, pat in (
+        ("zelle", r"\bzelle\b"),
+        ("cashapp", r"\bcash\s?app\b|\bcashapp\b"),
+        ("gift_card", r"\bgift\s*cards?\b|steam\s+cards?|apple\s+gift|google\s+play\s+card"),
+        ("crypto", r"\b(crypto|bitcoin|btc|ethereum|eth|usdt|usdc)\b"),
+        ("wire", r"\bwire\b|bank\s+wire"),
+        ("venmo_friends", r"\bvenmo\b|friends?\s*(?:and|&)\s*family|\bf\s*&\s*f\b"),
+        ("paypal_goods", r"paypal"),
+        ("official_app", r"official\s+app|mobile\s+transfer|app\s+transfer|transfer\s+(?:through|via)\s+the\s+app"),
+        ("bank_transfer", r"bank\s+transfer"),
+        ("credit_card", r"credit\s+card"),
+    ):
+        if re.search(pat, t):
+            out["payment_method"] = name
+            break
+    if re.search(r"official\s+app|mobile\s+transfer|app\s+transfer|transfer\s+(?:through|via)\s+the\s+app", t):
+        out["transfer_method"] = "official_app"
+    elif re.search(r"\bpdf\b", t):
+        out["transfer_method"] = "pdf"
+    elif re.search(r"screen\s*shot", t):
+        out["transfer_method"] = "screenshot"
+    elif re.search(r"barcode\s+(?:image|photo|pic)|photo\s+of\s+(?:the\s+)?barcode", t):
+        out["transfer_method"] = "barcode_image"
+    elif re.search(r"\bin\s+person\b|meet\s+up|meet\s+in\s+person", t):
+        out["transfer_method"] = "in_person"
+    face = re.search(r"face\s+(?:value\s+)?(?:was\s+|is\s+)?(?:\$|usd\s*)?([0-9][0-9,]{0,6})", t)
+    if face:
+        out["face_value"] = int(face.group(1).replace(",", ""))
+    amounts = [int(m.replace(",", "")) for m in re.findall(r"(?:\$|usd\s*|€|£)\s?([0-9][0-9,]{0,6})", t) if m.replace(",", "").isdigit()]
+    if amounts:
+        fv = out.get("face_value")
+        asks = [a for a in amounts if a != fv] or amounts
+        out["price"] = min(asks)
+    if re.search(r"\$|\busd\b", t):
+        out["currency"] = "USD"
+    elif "€" in t:
+        out["currency"] = "EUR"
+    elif "£" in t:
+        out["currency"] = "GBP"
+    q = re.search(r"\b([0-9]{1,2})\s+(?:tickets?|seats?|tix|entradas|billets?)\b", t)
+    if q:
+        out["quantity"] = int(q.group(1))
+    elif re.search(r"\bpair\s+of\b|\btwo\s+(?:tickets?|seats?)\b", t):
+        out["quantity"] = 2
+    h = re.search(r"@([a-zA-Z0-9_.]{2,30})", text or "")
+    if h:
+        out["seller_handle"] = "@" + h.group(1)
+    u = re.search(r"https?://([^\s/]+)", text or "")
+    if u:
+        out["domain"] = u.group(1).lower()
+    ev = re.search(r"(world\s+cup|the\s+final\b|semi[-\s]?final|championship|super\s*bowl|playoffs?|concert)", t)
+    if ev:
+        out["event"] = ev.group(1).strip()
+    cues: list[str] = []
+    for pat, label in (
+        (r"toda?y|tonight|right\s+now|asap|immediately|within\s+the\s+hour", "must act immediately"),
+        (r"\bfast\b|hurry|quick(?:ly)?", "pressure to act fast"),
+        (r"last\s+chance|final\s+notice|won'?t\s+last", "last-chance pressure"),
+        (r"\d+\s+(?:people|others)\s+(?:are\s+)?interested|others?\s+(?:are\s+)?interested|several\s+(?:people\s+)?interested", "claims others are interested"),
+        (r"must\s+sell|need\s+to\s+sell|selling\s+(?:fast|tonight|today)", "urgency to sell"),
+        (r"no\s+refunds?", "no refunds offered"),
+        (r"trust\s+me", "asks for blind trust"),
+        (r"pay\s+(?:first|now|upfront)|send\s+(?:payment|money)\s+(?:first|now)|pdf\s+after\s+(?:payment|you\s+pay)", "demands payment up front"),
+    ):
+        if re.search(pat, t):
+            cues.append(label)
+    if cues:
+        out["urgency_cues"] = cues
+    return _ensure_keys(out)
+
+
 # --------------------------------------------------------------------------- #
 # Public: normalize from each source type. Returns:
 #   {"status":"ok","listing":{...},"source":"text|pdf|image|url","extracted":{...}}
@@ -143,6 +221,7 @@ def normalize_text(text: str, extracted: dict | None = None,
         return {"status": "not_configured", "reason": "Gemini key missing (GOOGLE_API_KEY)"}
     if not text or not text.strip():
         return {"status": "error", "reason": "empty content"}
+    degraded = False
     try:
         resp = client.models.generate_content(
             model=model or config.GEMINI_MODEL,
@@ -154,15 +233,18 @@ def normalize_text(text: str, extracted: dict | None = None,
         )
         obj = parse_json(resp.text or "")
         if obj is None:
-            return {"status": "error", "reason": "normalizer returned non-JSON"}
-        listing = _ensure_keys(obj)
-        # Carry through a barcode we decoded ourselves if Gemini missed it.
-        if extracted and extracted.get("barcode") and not listing.get("barcode_or_ref"):
-            listing["barcode_or_ref"] = extracted["barcode"]
-        return {"status": "ok", "listing": listing, "source": source,
-                "extracted": extracted or {}}
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "reason": str(exc)[:160]}
+            listing, degraded = _regex_extract(text), True
+        else:
+            listing = _ensure_keys(obj)
+    except Exception:  # noqa: BLE001
+        # Gemini unavailable (429/quota/timeout/etc.) — DEGRADE to deterministic
+        # regex extraction so the investigation still completes (never dies at step 1).
+        listing, degraded = _regex_extract(text), True
+    # Carry through a barcode we decoded ourselves if Gemini missed it.
+    if extracted and extracted.get("barcode") and not listing.get("barcode_or_ref"):
+        listing["barcode_or_ref"] = extracted["barcode"]
+    return {"status": "ok", "listing": listing, "source": source,
+            "extracted": extracted or {}, "degraded": degraded}
 
 
 def normalize_pdf(pdf_bytes: bytes, model: str | None = None) -> dict:
@@ -225,8 +307,13 @@ def normalize_image(image_bytes: bytes, mime: str = "image/png",
         # Separate Gemini call for tamper hints (vision), best-effort.
         extracted["tamper_hints"] = _image_tamper_hints(client, image_bytes, mime)
         return {"status": "ok", "listing": listing, "source": "image", "extracted": extracted}
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "reason": str(exc)[:160]}
+    except Exception:  # noqa: BLE001
+        # Vision unavailable (429/quota) — can't OCR, but don't die: degrade to a
+        # listing carrying any decoded barcode + the screenshot tell (itself a risk).
+        listing = _ensure_keys({"transfer_method": "screenshot", "barcode_or_ref": barcode or None,
+                                "urgency_cues": ["ticket provided only as an image/screenshot"]})
+        return {"status": "ok", "listing": listing, "source": "image",
+                "extracted": extracted, "degraded": True}
 
 
 def normalize_url(url: str, model: str | None = None) -> dict:
@@ -283,8 +370,12 @@ def _normalize_binary(data: bytes, mime: str, extracted: dict, source: str,
             return {"status": "error", "reason": "binary normalizer returned non-JSON"}
         return {"status": "ok", "listing": _ensure_keys(obj), "source": source,
                 "extracted": extracted}
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "reason": str(exc)[:160]}
+    except Exception:  # noqa: BLE001
+        # OCR vision unavailable (429/quota) — degrade instead of dying.
+        listing = _ensure_keys({"transfer_method": "pdf" if source == "pdf" else "unknown",
+                                "urgency_cues": ["document could not be read live (AI vision unavailable)"]})
+        return {"status": "ok", "listing": listing, "source": source,
+                "extracted": extracted, "degraded": True}
 
 
 def _image_tamper_hints(client: genai.Client, image_bytes: bytes, mime: str) -> str | None:
