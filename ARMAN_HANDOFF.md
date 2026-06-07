@@ -18,7 +18,7 @@ Brutal QA: only **6 of 23** test inputs ever returned a verdict; the rest got `4
 **Fix:**
 1. **Get a fresh Gemini API key** — new key in Google AI Studio (aistudio.google.com → "Get API key"), or enable **billing / paid** so RPM/RPD limits don't trip during a demo. Free tier is too low.
 2. **Render → your backend service → Environment:** set `GEMINI_API_KEY` (and/or `GOOGLE_API_KEY`) = new key. Keep `USE_VERTEXAI=FALSE`, `GEMINI_MODEL=gemini-2.5-flash`.
-3. **Manual Deploy → Deploy latest commit** (branch `ticketguard`). This also activates my pushed code fixes (#3 below).
+3. **Manual Deploy → Deploy latest commit** (branch `ticketguard`). **A redeploy ALONE — even before the new key — makes the live demo COMPLETE**, because I added a no-LLM resilience layer: a regex extractor (`ingest._regex_extract`) so step-1 no longer dies on a 429, plus a rule-engine verdict fallback. It runs in degraded mode on exhausted quota (verified: scam→signals, legit→clean; see `EVAL_RESULTS.md`). The fresh key then restores full Gemini quality. (Activates all pushed fixes — see #3.)
 4. **Verify:**
    ```bash
    curl -X POST https://pitchcraft-agent.onrender.com/api/check -H "content-type: application/json" \
