@@ -127,10 +127,10 @@ export default function HeroSection() {
         </motion.p>
 
         {/* CTAs */}
-        <motion.div variants={fadeUpItem} className="flex flex-wrap items-center justify-center gap-3">
+        <motion.div variants={fadeUpItem} className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 w-full max-w-md mx-auto">
           <MagneticButton
             onClick={() => router.push("/investigate")}
-            className="group relative inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-semibold text-sm cursor-pointer overflow-hidden"
+            className="group relative inline-flex w-full sm:w-auto items-center justify-center gap-2 px-7 py-3.5 rounded-xl font-semibold text-sm cursor-pointer overflow-hidden"
             style={{
               background: "linear-gradient(180deg, var(--tg-accent), var(--tg-accent-2))",
               color: "var(--tg-on-accent)",
@@ -153,7 +153,7 @@ export default function HeroSection() {
           </MagneticButton>
           <a
             href="#how"
-            className="group inline-flex items-center gap-1.5 px-7 py-3.5 rounded-xl font-medium text-sm cursor-pointer transition-[background,border-color,transform] duration-200 ease-out active:scale-[0.97]"
+            className="group inline-flex w-full sm:w-auto items-center justify-center gap-1.5 px-7 py-3.5 rounded-xl font-medium text-sm cursor-pointer transition-[background,border-color,transform] duration-200 ease-out active:scale-[0.97]"
             style={{
               background: "var(--tg-surface-2)",
               color: "var(--tg-text)",

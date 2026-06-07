@@ -26,8 +26,8 @@ const CHANNELS = [
   },
   {
     Icon: FileText,
-    title: "Upload the ticket",
-    body: "Drop in a ticket PDF or photo. We read the barcode/QR, inspect the file's metadata for tampering, and check it against tickets we've seen before.",
+    title: "Upload ticket evidence",
+    body: "Drop in a ticket PDF or photo. We read the barcode/QR, inspect the file's metadata for tampering, and flag duplicates — risk signals, not an authenticity guarantee.",
     tag: "Live",
   },
   {

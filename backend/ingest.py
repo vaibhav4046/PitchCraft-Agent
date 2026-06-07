@@ -202,6 +202,13 @@ def _regex_extract(text: str) -> dict:
     ):
         if re.search(pat, t):
             cues.append(label)
+    # off-platform / lookalike domain + phishing-style language (no Atlas needed)
+    dom = out.get("domain") or ""
+    _OFFICIAL = ("ticketmaster", "stubhub", "seatgeek", "vividseats", "axs.", "fifa.com", "livenation")
+    if dom and not any(o in dom for o in _OFFICIAL) and re.search(r"resale|ticket|deal|cheap|discount|\bcup\b|direct|hub|\.test", dom):
+        cues.append(f"unrecognized off-platform resale site ({dom})")
+    if re.search(r"best\s+prices|secure\s+(?:your\s+)?(?:checkout|reservation)|unlock\s+your\s+(?:ticket|reservation)|advance\s+reservation|hold\s+your\s+seats?|reservation\s+(?:fee|hold)|itunes\s+gift", t):
+        cues.append("phishing-style reservation/discount language")
     if cues:
         out["urgency_cues"] = cues
     return _ensure_keys(out)
