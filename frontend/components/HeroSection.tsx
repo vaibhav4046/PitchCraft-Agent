@@ -120,10 +120,11 @@ export default function HeroSection() {
             letterSpacing: "0.005em",
           }}
         >
-          Paste a suspicious resale listing or seller DM. An AI agent runs a
-          multi-step investigation — grounded in MongoDB Atlas Vector Search and
-          the MongoDB MCP server — and returns an evidence-backed risk verdict
-          for major-event tickets like the 2026 World Cup.
+          Paste a listing, seller DM, screenshot, PDF or link. A multi-step AI
+          agent investigates it — grounded in MongoDB Atlas and the MCP server —
+          returns an evidence-backed risk verdict, and hands you an exportable
+          evidence packet plus the next actions to take. Built for 2026 World Cup
+          resale fraud.
         </motion.p>
 
         {/* CTAs */}

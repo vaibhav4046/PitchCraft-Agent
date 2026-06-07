@@ -1,7 +1,7 @@
 "use client"
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ShieldAlert, AlertTriangle, ShieldCheck, Flag, ArrowRight, CheckCircle2, ExternalLink } from "lucide-react"
+import { ShieldAlert, AlertTriangle, ShieldCheck, Flag, ArrowRight, CheckCircle2, ExternalLink, Download } from "lucide-react"
 import type { Investigation, RiskLevel } from "@/lib/types"
 import ContributionBars from "@/components/ContributionBars"
 import { useCountUp } from "@/lib/useCountUp"
@@ -247,6 +247,38 @@ export default function RiskCard({
   const [showResale, setShowResale] = useState(false)
   const [showProceed, setShowProceed] = useState(false)
 
+  // Agent action: produce a shareable EVIDENCE PACKET (client-side — works even
+  // if the backend is down, since the verdict is already in hand).
+  function downloadEvidence() {
+    const lines = [
+      "TICKETGUARD — TICKET-RESALE SCAM-RISK EVIDENCE PACKET",
+      "=".repeat(52),
+      `Verdict:     ${t.tag}`,
+      `Risk score:  ${riskScore} / 100`,
+      modelUsed ? `Engine:      ${modelUsed}${isFallback ? " (fallback)" : ""}` : null,
+      "",
+      "REASONING",
+      rationale || "(none)",
+      "",
+      "EVIDENCE",
+      ...(evidence || []).map((e, i) => `  ${i + 1}. ${e.label}${e.why ? " — " + e.why : ""}`),
+      "",
+      "LISTING SIGNALS",
+      ...(investigation.entities || []).map(e => `  ${e.kind}: ${e.value}`),
+      "",
+      "Decision-support only — NOT a proof of authenticity. Verify the seller",
+      "independently and pay only through official, protected channels.",
+      "Report fraud:  reportfraud.ftc.gov   ·   ic3.gov",
+    ].filter(l => l !== null).join("\n")
+    const blob = new Blob([lines], { type: "text/plain;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `ticketguard-evidence-${t.tag.toLowerCase()}.txt`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <>
       <VerifiedResaleModal open={showResale} onClose={() => setShowResale(false)} reduced={reduced} />
@@ -410,6 +442,28 @@ export default function RiskCard({
           >
             Proceed, I accept the risk
           </motion.button>
+
+          {/* Agent actions: evidence packet + report to authorities */}
+          <button
+            id="btn-export-evidence"
+            onClick={downloadEvidence}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition-colors duration-200"
+            style={{ background: "var(--tg-surface-2)", color: "var(--tg-text-2)", border: "1px solid var(--tg-border-strong)" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "var(--tg-text)")}
+            onMouseLeave={e => (e.currentTarget.style.color = "var(--tg-text-2)")}>
+            <Download size={14} strokeWidth={2.2} /> Export evidence
+          </button>
+
+          {riskLevel !== "LOW" && (
+            <a
+              href="https://reportfraud.ftc.gov" target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition-colors duration-200"
+              style={{ background: "var(--tg-surface-2)", color: "var(--tg-text-2)", border: "1px solid var(--tg-border-strong)" }}
+              onMouseEnter={e => (e.currentTarget.style.color = "var(--tg-text)")}
+              onMouseLeave={e => (e.currentTarget.style.color = "var(--tg-text-2)")}>
+              <ExternalLink size={14} strokeWidth={2.2} /> Report to FTC / IC3
+            </a>
+          )}
         </div>
 
         <p className="text-xs mt-4" style={{ color: "var(--tg-text-3)", lineHeight: 1.5 }}>
